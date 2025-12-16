@@ -27,6 +27,8 @@ export const initializePayment = async (paymentData: {
 }) => {
   try {
     const response = await apiClient.post('/payment', paymentData);
+    
+    // Return the response data directly, preserving the structure
     return response.data;
   } catch (error) {
     console.error('Payment initialization error:', error); // Added logging
