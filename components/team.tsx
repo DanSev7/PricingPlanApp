@@ -1,279 +1,277 @@
-const express = require('express');
-const nodemailer = require('nodemailer');
-const bodyParser = require('body-parser');
-const cors = require('cors');
-const fs = require('fs');
-const path = require('path');
-require('dotenv').config();
+// screens/TeamScreen.tsx (Refined, Modern Grid Layout)
+import ParallaxScrollView from '@/components/parallax-scroll-view';
+import { ScreenHeader } from '@/components/screen-header';
+import { ThemedText } from '@/components/themed-text';
+import { ThemedView } from '@/components/themed-view';
+import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
+import { useRouter } from 'expo-router';
+import { StyleSheet, View } from 'react-native';
+import { TouchableOpacity } from 'react-native-gesture-handler';
 
-// Ensure ChapaService is available. 
-// Assuming it's a class exported from './services/chapa' as suggested by the original imports.
-const ChapaService = require('./services/chapaService'); 
+// --- Color Constants ---
+const BG_COLOR = '#0f172b';
+const CARD_COLOR = '#1d293b';
+const TINT_COLOR = '#09b6d4';
+const TEXT_COLOR = '#ffffff';
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-// Initialize Chapa service
-const chapaService = new ChapaService(); 
-
-// --- Middleware ---
-
-// Configure CORS for all origins and common methods/headers
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-
-// Parse JSON and URL-encoded bodies
-app.use(bodyParser.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json()); // Added for completeness, though bodyParser.json() handles it
-
-// Serve static files from the root and 'public' directory
-app.use(express.static('.'));
-app.use(express.static(path.join(__dirname, 'public')));
-
-
-// --- Email Transporter Setup ---
-
-// Create transporter for Nodemailer
-const transporter = nodemailer.createTransport({
-  service: 'gmail', // You can change this to your email provider
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
-
-
-// --- General Endpoints ---
-
-// Home/Root endpoint
-app.get('/', (req, res) => {
-  res.json({ 
-    message: 'Chapa Payment Gateway API', 
-    status: 'running',
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'OK', 
-    service: 'Chapa Payment Gateway',
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Route to serve the close-webview page (for Chapa return)
-app.get('/close-webview', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'close.html'));
-});
-
-
-// --- Contact Form Endpoints ---
-
-// Main contact form endpoint
-app.post('/contact', async (req, res) => {
-  try {
-    const { name, email, subject = `Contact Form Submission from ${name}`, message } = req.body;
-
-    // Validate input
-    if (!name || !email || !message) {
-      return res.status(400).json({ error: 'Name, email, and message are required' });
-    }
-
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({ error: 'Invalid email format' });
-    }
-
-    // Define email options
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: process.env.TO_EMAIL || 'info@ethiotechleaders.com',
-      subject: `Contact Form Submission: ${subject}`,
-      html: `
-        <h2>New Contact Form Submission</h2>
-        <p><strong>Name:</strong> ${name}</p>
-        <p><strong>Email:</strong> ${email}</p>
-        <p><strong>Subject:</strong> ${subject}</p>
-        <p><strong>Message:</strong></p>
-        <p>${message.replace(/\n/g, '<br>')}</p>
-      `,
-    };
-
-    // Send email
-    await transporter.sendMail(mailOptions);
-
-    res.status(200).json({ message: 'Message sent successfully' });
-  } catch (error) {
-    console.error('Error sending email on /contact:', error);
-    res.status(500).json({ error: 'Failed to send message' });
-  }
-});
-
-// Team contact form endpoint (sends email directly to a specified recipient)
-app.post('/team-contact', async (req, res) => {
-  try {
-    const { name, email, subject, message, recipientEmail } = req.body;
-
-    // Validate input
-    if (!name || !email || !message || !recipientEmail) {
-      return res.status(400).json({ error: 'Name, email, message, and recipient email are required' });
-    }
-
-    // Validate email formats
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({ error: 'Invalid sender email format' });
-    }
-    
-    if (!emailRegex.test(recipientEmail)) {
-      return res.status(400).json({ error: 'Invalid recipient email format' });
-    }
-
-    // Define email options - send to the specific team member
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: recipientEmail,
-      subject: subject || `Message from ${name}`,
-      html: `
-        <h2>You have received a message</h2>
-        <p><strong>From:</strong> ${name} &lt;${email}&gt;</p>
-        <p><strong>Subject:</strong> ${subject || 'No Subject'}</p>
-        <p><strong>Message:</strong></p>
-        <p>${message.replace(/\n/g, '<br>')}</p>
-        <hr>
-        <p><em>This message was sent through the Ethiotech Leaders website contact form.</em></p>
-      `,
-    };
-
-    // Send email
-    await transporter.sendMail(mailOptions);
-
-    res.status(200).json({ message: 'Message sent successfully' });
-  } catch (error) {
-    console.error('Error sending email on /team-contact:', error);
-    res.status(500).json({ error: 'Failed to send message' });
-  }
-});
-
-
-// --- Chapa Payment Endpoints ---
-
-// Payment initialization endpoint
-app.post('/api/payment', async (req, res) => {
-  try {
-    const { amount, email, firstName, lastName, plan } = req.body;
-    
-    // Validate required fields
-    if (!amount || !email || !firstName || !lastName || !plan) {
-      return res.status(400).json({ 
-        error: 'Missing required fields: amount, email, firstName, lastName, plan' 
-      });
-    }
-    
-    // Create payment data object
-    const paymentData = {
-      amount,
-      email,
-      firstName,
-      lastName,
-      plan
-    };
-    
-    // Initialize payment with Chapa
-    const paymentResponse = await chapaService.initializePayment(paymentData);
-    
-    res.json({
-      success: true,
-      message: 'Payment initialized successfully',
-      data: paymentResponse
-    });
-  } catch (error) {
-    console.error('Payment initialization error:', error);
-    res.status(500).json({ 
-      error: error.message || 'An error occurred while processing the payment' 
-    });
-  }
-});
-
-// Webhook endpoint for Chapa to send payment notifications
-app.post('/api/webhook/chapa', async (req, res) => {
-  try {
-    console.log('Webhook received:', req.body);
-    
-    // Extract transaction reference and status
-    const { tx_ref, status } = req.body;
-    
-    if (tx_ref && status) {
-      // Verify the payment with Chapa
-      const verification = await chapaService.verifyPayment(tx_ref);
-      
-      console.log(`Payment ${status} for transaction ${tx_ref}`, verification);
-      
-      // If payment is successful, you might want to update user's plan in your database
-      if (status === 'success' && verification && verification.status === 'success') {
-        console.log('Payment successful and verified for transaction:', tx_ref);
-        // !!! IMPORTANT: Update user subscription/service in your database here
-      }
-    }
-    
-    // Send success response to Chapa
-    res.json({ 
-      success: true, 
-      message: 'Webhook received successfully' 
-    });
-  } catch (error) {
-    console.error('Webhook error:', error);
-    res.status(500).json({ 
-      error: 'An error occurred while processing the webhook' 
-    });
-  }
-});
-
-// Verification endpoint for checking payment status
-app.get('/api/verify/:tx_ref', async (req, res) => {
-  try {
-    const { tx_ref } = req.params;
-    
-    if (!tx_ref) {
-      return res.status(400).json({ 
-        error: 'Transaction reference is required' 
-      });
-    }
-    
-    // Verify payment with Chapa
-    const verification = await chapaService.verifyPayment(tx_ref);
-    
-    res.json({
-      success: true,
-      data: verification
-    });
-  } catch (error) {
-    console.error('Verification error:', error);
-    res.status(500).json({ 
-      error: error.message || 'An error occurred while verifying the payment' 
-    });
-  }
-});
-
-
-// --- Server Start ---
-
-// Start server only if this file is run directly (not imported)
-if (require.main === module) {
-  // Bind to all network interfaces to allow connections from other devices
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server is running on all network interfaces on port ${PORT}`);
-    console.log(`Accessible at http://localhost:${PORT}`);
-    // Note: The specific local IP (192.168.1.5) is device-dependent and removed for generality.
-  });
+// Define the team member type
+interface TeamMember {
+  id: string;
+  name: string;
+  role: string;
+  imageAsset: any; // Local asset
+  email: string;
 }
 
-// Export app for testing or importing in other files
-module.exports = app;
+// Team member data
+const teamMembers: TeamMember[] = [
+    {
+        id: '1',
+        name: "Mr. Ephrem Gebeyehu",
+        role: "CEO and Founder of Ethiotech Leaders",
+        imageAsset: require('@/assets/images/Ephrem-G.jpg'),
+        email: "ephrem.gebeyehu@ethiotechleaders.com"
+    },
+    {
+        id: '2',
+        name: "Sara Ayele",
+        role: "Mobile App Developer",
+        imageAsset: require('@/assets/images/Sarah-A.jpg'),
+        email: "ergibayele7@gmail.com"
+    },
+    {
+        id: '3',
+        name: "Daniel Ayele",
+        role: "Web app Developer",
+        imageAsset: require('@/assets/images/Daniel-A.jpg'),
+        email: "danielayele077@gmail.com"
+    }
+];
+
+// Helper Component for a single team member card
+const TeamMemberCard = ({ name, role, imageAsset, onPress }: any) => {
+    return (
+        <TouchableOpacity 
+            style={[teamStyles.memberCard, { backgroundColor: CARD_COLOR }]}
+            onPress={onPress}
+            activeOpacity={0.7} // Reduced opacity for subtle feedback
+        >
+            <Image
+                source={imageAsset}
+                style={teamStyles.memberImage}
+                contentFit="cover"
+            />
+            <ThemedText style={[teamStyles.memberName, { color: TEXT_COLOR }]}>
+                {name}
+            </ThemedText>
+            <ThemedText style={[teamStyles.memberRole, { color: TINT_COLOR }]}>
+                {role}
+            </ThemedText>
+        </TouchableOpacity>
+    );
+};
+
+export default function TeamScreen() {
+    const router = useRouter();
+
+    const ceo = teamMembers[0];
+    const otherMembers = teamMembers.slice(1);
+
+    const navigateToDetail = (member: TeamMember) => {
+        router.push({
+            pathname: '/screens/team-detail',
+            params: {
+                name: member.name,
+                role: member.role,
+                imageAsset: member.imageAsset, // Pass local asset directly
+                email: member.email
+            },
+        });
+    };
+
+    return (
+        <ThemedView style={[teamStyles.container, { backgroundColor: BG_COLOR }]}>
+            <ParallaxScrollView
+                headerBackgroundColor={{ light: BG_COLOR, dark: BG_COLOR }}
+                headerImage={
+                    <View style={teamStyles.headerImage}>
+                        <Ionicons name="people-circle-outline" size={150} color={TINT_COLOR} />
+                    </View>
+                }
+            >
+                {/* Back Arrow */}
+                {/* <TouchableOpacity 
+                    style={teamStyles.backButton}
+                    onPress={() => router.back()}
+                >
+                    <Ionicons name="arrow-back" size={26} color={TEXT_COLOR} />
+                </TouchableOpacity> */}
+                
+                {/* Unified Screen Header */}
+                <ScreenHeader 
+                  title="Our Leadership Team" 
+                  subtitle="Meet the experts driving time optimization and innovation."
+                />
+                
+                {/* 3. CEO Section (Standalone Card) */}
+                <ThemedView style={[teamStyles.ceoSection, { backgroundColor: CARD_COLOR }]}>
+                    <ThemedText type="subtitle" style={[teamStyles.sectionHeading,]}>
+                        Executive Leader
+                    </ThemedText>
+                    <TeamMemberCard 
+                        name={ceo.name}
+                        role={ceo.role}
+                        imageAsset={ceo.imageAsset}
+                        onPress={() => navigateToDetail(ceo)}
+                    />
+                </ThemedView>
+
+                {/* 4. Other Team Members Grid */}
+                <ThemedView style={[teamStyles.teamGridSection, { backgroundColor: CARD_COLOR }]}>
+                    <ThemedText type="subtitle" style={[teamStyles.sectionHeading,]}>
+                        IT Professionals
+                    </ThemedText>
+                    <View style={teamStyles.memberGrid}>
+                        {otherMembers.map((member) => (
+                            <View key={member.id} style={teamStyles.gridItem}>
+                                <TeamMemberCard
+                                    name={member.name}
+                                    role={member.role}
+                                    imageAsset={member.imageAsset}
+                                    onPress={() => navigateToDetail(member)}
+                                />
+                            </View>
+                        ))}
+                    </View>
+                </ThemedView>
+
+                <View style={{ height: 40 }} />
+            </ParallaxScrollView>
+        </ThemedView>
+    );
+}
+
+const teamStyles = StyleSheet.create({
+    container: {
+        flex: 1,
+        paddingTop: 0, // Removed unnecessary paddingTop
+    },
+    headerImage: {
+        height: 200,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    
+    // --- Back Button Styles (Fixed & Professional) ---
+    backButton: {
+        position: 'absolute',
+        top: 50,
+        left: 20,
+        zIndex: 10,
+        padding: 10,
+        backgroundColor: 'rgba(15, 23, 43, 0.9)', // Dark background with higher opacity
+        borderRadius: 20,
+        elevation: 8, // Increased elevation
+        shadowColor: '#000',
+        shadowOffset: { width: 3, height: 8 }, // Increased shadow offset
+        shadowOpacity: 1,
+        shadowRadius: 6,
+    },
+    backButtonText: {
+        fontSize: 16,
+        fontWeight: '600',
+        marginLeft: 5,
+    },
+    // --- End Back Button Styles ---
+    
+    titleContainer: {
+        paddingHorizontal: 12,
+        marginBottom: 20, // Increased spacing
+        alignItems: 'center',
+    },
+    mainTitle: {
+        fontSize: 30, // Larger title
+        fontWeight: '600', // Bolder title
+        textAlign: 'center',
+    },
+    subtitle: {
+        fontSize: 16,
+        textAlign: 'center',
+        lineHeight: 24,
+        opacity: 0.9,
+        marginTop: 8,
+    },
+    
+    sectionHeading: {
+        fontSize: 20,
+        fontWeight: '600',
+        color: TINT_COLOR,
+        marginBottom: 16,
+        textAlign: 'center',
+    },
+    
+    ceoSection: {
+        margin: 20,
+        marginTop: 0,
+        padding: 20,
+        borderRadius: 16,
+        elevation: 4,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+    },
+    
+    teamGridSection: {
+        margin: 20,
+        marginTop: 0,
+        padding: 20,
+        borderRadius: 16,
+        elevation: 4,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+    },
+    
+    memberGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'space-between',
+    },
+    
+    gridItem: {
+        width: '48%', // Two columns with some spacing
+        marginBottom: 16,
+    },
+    
+    memberCard: {
+        borderRadius: 16,
+        overflow: 'hidden',
+        alignItems: 'center',
+        padding: 16,
+    },
+    
+    memberImage: {
+        width: 120,
+        height: 120,
+        borderRadius: 60,
+        marginBottom: 12,
+        borderWidth: 2,
+        borderColor: TINT_COLOR,
+    },
+    
+    memberName: {
+        fontSize: 16,
+        fontWeight: '600',
+        textAlign: 'center',
+        marginBottom: 4,
+    },
+    
+    memberRole: {
+        fontSize: 14,
+        textAlign: 'center',
+        opacity: 0.8,
+    },
+});
